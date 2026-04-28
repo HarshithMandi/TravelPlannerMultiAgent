@@ -1,0 +1,10 @@
+.env
+.venv/
+venv/
+__pycache__/
+*.pyc
+data/chroma/
+logs/
+output/*.pdf
+.DS_Store
+.streamlit/secrets.toml
