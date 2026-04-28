@@ -1,15 +1,16 @@
-import requests
+from typing import Optional
+
 from src.state.schemas import TripPlannerState
 from src.config.settings import settings
+from src.services.weather_service import WeatherService
 
 
-def run(state: TripPlannerState) -> TripPlannerState:
-    api = settings.OPENWEATHERMAP_API_KEY
-    dest = state.trip_preferences.get("destination")
-    if not api:
-        state.weather_data = {"note": "No OpenWeatherMap API key configured; using mock weather."}
+def run(state: TripPlannerState, weather_service: Optional[WeatherService] = None) -> TripPlannerState:
+    weather_service = weather_service or WeatherService()
+    destination = state.trip_preferences.get("destination")
+    if not destination:
+        state.weather_data = {"source": "fallback", "summary": "Destination missing"}
         return state
 
-    # Very simple geocoding via OpenWeatherMap not included; use mock for demo
-    state.weather_data = {"forecast": "Sunny, pleasant; mock data"}
+    state.weather_data = weather_service.fetch_weather(destination)
     return state

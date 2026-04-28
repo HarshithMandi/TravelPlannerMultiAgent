@@ -1,0 +1,83 @@
+============================================================
+TRIP PLANNER REPORT
+============================================================
+Session ID: s1
+
+TRIP DETAILS
+------------------------------------------------------------
+From: A → To: B
+Dates: 2026-01-01 to 2026-01-05
+Budget: ₹100,000
+Travelers: 1
+Travel Type: None
+Hotel Preference: None
+Food Preference: None
+Transport: None
+Interests: 
+Luxury Level: None
+
+ITINERARY SUMMARY
+------------------------------------------------------------
+Destination: B
+Trip Duration: 5 days
+Weather: openweathermap: 15.39°C, clear sky
+Hotel: Stay near מלון מגדל ירושלים
+Transport: flight - User preference
+
+DAY-BY-DAY PLAN
+------------------------------------------------------------
+
+Day 1: Tourist attractions in Dubai
+  Morning: Tourist attractions in Dubai
+  Afternoon: AAAAA Tourist Attractions of China
+  Evening: Local cuisine in B
+  Notes:
+    • Morning: There are many tourist attractions in Dubai, resulting from the large scale construction boom. Dubai received 14 million...
+    • Afternoon: Lǚyóu Jǐngqū) is awarded to the most important and best-maintained tourist attractions in the People s Republic of China...
+    • Weather: openweathermap: 15.39°C, clear sky
+    • Stay: Stay near מלון מגדל ירושלים
+    • Transport: flight - User preference
+
+Day 2: AAAAA Tourist Attractions of China
+  Morning: AAAAA Tourist Attractions of China
+  Afternoon: שער האשפות
+  Evening: Casual dining in B
+  Notes:
+    • Morning: Lǚyóu Jǐngqū) is awarded to the most important and best-maintained tourist attractions in the People s Republic of China...
+    • Afternoon: Dung Gate...
+    • Weather: openweathermap: 15.39°C, clear sky
+    • Stay: Stay near מלון מגדל ירושלים
+
+Day 3: שער האשפות
+  Morning: שער האשפות
+  Afternoon: רימון
+  Evening: Regional specialties in B
+  Notes:
+    • Morning: Dung Gate...
+    • Afternoon: italian...
+    • Weather: openweathermap: 15.39°C, clear sky
+    • Stay: Stay near מלון מגדל ירושלים
+
+Day 4: רימון
+  Morning: רימון
+  Afternoon: טחנת הרוח
+  Evening: Upscale dining in B
+  Notes:
+    • Morning: italian...
+    • Afternoon: Montefiore Windmill...
+    • Weather: openweathermap: 15.39°C, clear sky
+    • Stay: Stay near מלון מגדל ירושלים
+
+Day 5: טחנת הרוח
+  Morning: טחנת הרוח
+  Afternoon: Olive & Fish
+  Evening: Evening dining and relaxation
+  Notes:
+    • Morning: Montefiore Windmill...
+    • Afternoon: Olive & Fish...
+    • Weather: openweathermap: 15.39°C, clear sky
+    • Stay: Stay near מלון מגדל ירושלים
+
+============================================================
+END OF REPORT
+============================================================

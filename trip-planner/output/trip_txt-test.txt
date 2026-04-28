@@ -1,0 +1,83 @@
+============================================================
+TRIP PLANNER REPORT
+============================================================
+Session ID: txt-test
+
+TRIP DETAILS
+------------------------------------------------------------
+From: Bangalore → To: Goa
+Dates: 2026-05-01 to 2026-05-05
+Budget: ₹30,000
+Travelers: 2
+Travel Type: couple
+Hotel Preference: beach resort
+Food Preference: seafood
+Transport: flight
+Interests: beaches, nightlife, sightseeing
+Luxury Level: budget
+
+ITINERARY SUMMARY
+------------------------------------------------------------
+Destination: Goa
+Trip Duration: 5 days
+Weather: openweathermap: 29.3°C, overcast clouds
+Hotel: Stay near Chatrapati Hotel
+Transport: flight - User preference
+
+DAY-BY-DAY PLAN
+------------------------------------------------------------
+
+Day 1: Tourism in Goa
+  Morning: Tourism in Goa
+  Afternoon: Goa
+  Evening: Local cuisine in Goa
+  Notes:
+    • Morning: enclave on Indian soil. Thus, tourism forms the backbone of Goa s economy. Major tourist attractions include Bom Jesus B...
+    • Afternoon: demographic. Goa stands 6th in the Top 10 Nightlife cities in the world in National Geographic Travel. One of the bigges...
+    • Weather: openweathermap: 29.3°C, overcast clouds
+    • Stay: Stay near Chatrapati Hotel
+    • Transport: flight - User preference
+
+Day 2: Goa
+  Morning: Goa
+  Afternoon: Damodar
+  Evening: Street food and local eatery tour
+  Notes:
+    • Morning: demographic. Goa stands 6th in the Top 10 Nightlife cities in the world in National Geographic Travel. One of the bigges...
+    • Afternoon: Visit this restaurant in Goa...
+    • Weather: openweathermap: 29.3°C, overcast clouds
+    • Stay: Stay near Chatrapati Hotel
+
+Day 3: Damodar
+  Morning: Damodar
+  Afternoon: Azavedo Bar & Restaurant
+  Evening: Regional specialties in Goa
+  Notes:
+    • Morning: Visit this restaurant in Goa...
+    • Afternoon: Visit this restaurant in Goa...
+    • Weather: openweathermap: 29.3°C, overcast clouds
+    • Stay: Stay near Chatrapati Hotel
+
+Day 4: Azavedo Bar & Restaurant
+  Morning: Azavedo Bar & Restaurant
+  Afternoon: Shilpa Restaurant
+  Evening: Fine dining or hotel restaurant
+  Notes:
+    • Morning: Visit this restaurant in Goa...
+    • Afternoon: Visit this restaurant in Goa...
+    • Weather: openweathermap: 29.3°C, overcast clouds
+    • Stay: Stay near Chatrapati Hotel
+
+Day 5: Shilpa Restaurant
+  Morning: Shilpa Restaurant
+  Afternoon: Flora Family Restaurant & Pub
+  Evening: Night market or pub crawl
+  Notes:
+    • Morning: Visit this restaurant in Goa...
+    • Afternoon: Visit this restaurant in Goa...
+    • Weather: openweathermap: 29.3°C, overcast clouds
+    • Stay: Stay near Chatrapati Hotel
+
+============================================================
+END OF REPORT
+============================================================

@@ -2,6 +2,12 @@ from typing import List
 import logging
 from src.state.schemas import TripPlannerState
 from src.agents import user_input_agent, memory_agent, weather_agent, transport_agent, hotel_agent, places_agent, budget_agent, itinerary_agent, final_review_agent, pdf_agent
+from src.services.geocoding_service import GeocodingService
+from src.services.weather_service import WeatherService
+from src.services.routing_service import RoutingService
+from src.services.places_service import PlacesService
+from src.services.hotel_service import HotelService
+from src.services.transport_service import TransportService
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +22,12 @@ class Orchestrator:
     def __init__(self, llm_service=None, embedding_service=None):
         self.llm = llm_service
         self.embed = embedding_service
+        self.geocoding_service = GeocodingService()
+        self.weather_service = WeatherService(self.geocoding_service)
+        self.routing_service = RoutingService(self.geocoding_service)
+        self.places_service = PlacesService(self.geocoding_service)
+        self.hotel_service = HotelService(self.geocoding_service)
+        self.transport_service = TransportService(self.routing_service)
 
     def _record_decision(self, state: TripPlannerState, selected: List[str], reason: str):
         state.orchestrator_decision = {"selected_next_agents": selected, "reason": reason}
@@ -32,10 +44,10 @@ class Orchestrator:
         # 3. Decide parallel agents
         parallel = ["weather_agent", "transport_agent", "hotel_agent", "places_agent"]
         self._record_decision(state, parallel, "Fetch weather, transport, hotels, places in parallel (sequential here)")
-        state = weather_agent.run(state)
-        state = transport_agent.run(state)
-        state = hotel_agent.run(state)
-        state = places_agent.run(state)
+        state = weather_agent.run(state, weather_service=self.weather_service)
+        state = transport_agent.run(state, transport_service=self.transport_service)
+        state = hotel_agent.run(state, hotel_service=self.hotel_service)
+        state = places_agent.run(state, places_service=self.places_service)
 
         # 4. Budget
         self._record_decision(state, ["budget_agent"], "Estimate and optimize budget")

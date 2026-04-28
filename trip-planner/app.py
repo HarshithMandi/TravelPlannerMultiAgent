@@ -5,6 +5,7 @@ from src.services.embedding_service import OpenAIEmbeddingService
 from src.agents.orchestrator import Orchestrator
 from src.state.schemas import TripPlannerState
 import uuid
+import os
 
 st.set_page_config(page_title="Multi-Agent Trip Planner", layout="wide")
 
@@ -62,7 +63,7 @@ if submitted:
 
     if debug:
         st.subheader("Graph State (raw)")
-        st.json(result_state.dict())
+        st.json(result_state.model_dump())
 
     st.subheader("Final Summary")
     final = result_state.final_output or {}
@@ -71,7 +72,7 @@ if submitted:
     st.subheader("Itinerary")
     st.write(result_state.itinerary or {})
 
-    if result_state.pdf_status and result_state.pdf_status.get("path"):
-        pdf_path = result_state.pdf_status["path"]
-        with open(pdf_path, "rb") as f:
-            st.download_button("Download PDF Report", f, file_name=pdf_path.split('/')[-1])
+    if result_state.pdf_status and result_state.pdf_status.path:
+        txt_path = result_state.pdf_status.path
+        with open(txt_path, "r", encoding="utf-8") as f:
+            st.download_button("Download TXT Report", f, file_name=os.path.basename(txt_path))
