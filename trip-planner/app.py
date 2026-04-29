@@ -50,9 +50,19 @@ if submitted:
 
     st.info("Starting orchestration — Orchestrator will drive agents now")
 
-    # Initialize services
-    llm = SarvamLLMService(api_key=settings.SARVAM_API_KEY, model=settings.SARVAM_MODEL)
-    embed = OpenAIEmbeddingService(api_key=settings.OPENAI_API_KEY, model=settings.OPENAI_EMBEDDING_MODEL)
+    # Initialize services (optional: app can run in demo mode without keys)
+    llm = None
+    embed = None
+
+    if settings.SARVAM_API_KEY:
+        llm = SarvamLLMService(api_key=settings.SARVAM_API_KEY, model=settings.SARVAM_MODEL)
+    else:
+        st.warning("SARVAM_API_KEY is not set — running without LLM calls (demo mode).")
+
+    if settings.OPENAI_API_KEY:
+        embed = OpenAIEmbeddingService(api_key=settings.OPENAI_API_KEY, model=settings.OPENAI_EMBEDDING_MODEL)
+    else:
+        st.warning("OPENAI_API_KEY is not set — running without vector memory (demo mode).")
 
     orchestrator = Orchestrator(llm_service=llm, embedding_service=embed)
 

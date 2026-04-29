@@ -1,6 +1,6 @@
 # Multi-Agent Trip Planner
 
-This project is a portfolio-grade Multi-Agent Trip Planner using Python, Streamlit, LangGraph-style orchestration, Sarvam for LLM generation, and OpenAI for embeddings.
+This project is a portfolio-grade Multi-Agent Trip Planner using Python, Streamlit, LangGraph orchestration, Sarvam for LLM generation, and OpenAI for embeddings.
 
 Overview
 - Orchestrator-driven multi-agent workflow with a shared typed state
@@ -35,4 +35,4 @@ Notes
 - Travel data integrations use free APIs when keys are provided, otherwise fallback mocks are used.
 
 Limitations & Next Steps
-- This initial scaffold provides full architecture and core modules. Add more robust provider implementations, more detailed prompts, and full LangGraph integration as needed.
+- This initial scaffold provides full architecture and core modules. Add more robust provider implementations and more detailed prompts as needed.

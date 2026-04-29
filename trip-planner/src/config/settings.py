@@ -8,7 +8,7 @@ load_dotenv()
 
 @dataclass(frozen=True)
 class Settings:
-    SARVAM_API_KEY: str
+    SARVAM_API_KEY: str = ""
     SARVAM_MODEL: str = "sarvam-m"
     OPENAI_API_KEY: str = ""
     OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
@@ -22,17 +22,10 @@ class Settings:
     LOG_LEVEL: str = "INFO"
 
 
-def _require_env(name: str) -> str:
-    value = os.getenv(name, "").strip()
-    if not value:
-        raise RuntimeError(f"Missing required environment variable: {name}")
-    return value
-
-
 settings = Settings(
-    SARVAM_API_KEY=_require_env("SARVAM_API_KEY"),
+    SARVAM_API_KEY=os.getenv("SARVAM_API_KEY", "").strip(),
     SARVAM_MODEL=os.getenv("SARVAM_MODEL", "sarvam-m"),
-    OPENAI_API_KEY=_require_env("OPENAI_API_KEY"),
+    OPENAI_API_KEY=os.getenv("OPENAI_API_KEY", "").strip(),
     OPENAI_EMBEDDING_MODEL=os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small"),
     OPENWEATHERMAP_API_KEY=os.getenv("OPENWEATHERMAP_API_KEY", ""),
     OPENTRIPMAP_API_KEY=os.getenv("OPENTRIPMAP_API_KEY", ""),
