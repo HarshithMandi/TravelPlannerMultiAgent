@@ -3,9 +3,13 @@ import re
 from typing import Dict, List
 
 from src.state.schemas import TripPlannerState
+from src.services.llm_service import SarvamLLMService
 
 
-def run(state: TripPlannerState) -> TripPlannerState:
+from typing import Optional
+
+
+def run(state: TripPlannerState, llm_service: Optional[SarvamLLMService] = None) -> TripPlannerState:
     """Convert raw place, weather, transport, and hotel data into a realistic, coherent day plan."""
 
     trip_days = _trip_day_count(state.trip_preferences.get("start_date"), state.trip_preferences.get("end_date"))
@@ -24,12 +28,11 @@ def run(state: TripPlannerState) -> TripPlannerState:
 
     # Build day plans using actual attractions
     itinerary_days: List[Dict] = []
+    itinerary_notes: List[str] = []
     dining_options = _get_dining_suggestions(destination, interests)
 
     for day_index in range(trip_days):
-        # Distribute real places across days
         morning_idx = day_index % len(real_places) if real_places else 0
-        # For afternoon, pick something different if possible
         afternoon_idx = (day_index + 1) % len(real_places) if len(real_places) > 1 else morning_idx
         
         morning_place = real_places[morning_idx] if real_places else {"name": f"Day {day_index + 1} in {destination}", "summary": "Explore highlights"}
@@ -40,12 +43,15 @@ def run(state: TripPlannerState) -> TripPlannerState:
         
         day_notes = []
         morning_summary = morning_place.get("summary", "").strip()
-        if morning_summary and len(morning_summary) > 5:  # Only if we have substantive description
-            day_notes.append(f"Morning: {morning_summary[:120]}...")
+        morning_best_for = morning_place.get("best_for")
+        if morning_summary and len(morning_summary) > 5:
+            day_notes.append(f"Morning detail: {_shorten(morning_summary, 150)}")
+        if morning_best_for:
+            day_notes.append(f"Best for: {morning_best_for}")
         
         afternoon_summary = afternoon_place.get("summary", "").strip() if afternoon_place != morning_place else None
         if afternoon_summary and len(afternoon_summary) > 5:
-            day_notes.append(f"Afternoon: {afternoon_summary[:120]}...")
+            day_notes.append(f"Afternoon detail: {_shorten(afternoon_summary, 150)}")
         
         if weather_summary:
             day_notes.append(f"Weather: {weather_summary}")
@@ -53,6 +59,7 @@ def run(state: TripPlannerState) -> TripPlannerState:
             day_notes.append(f"Stay: {hotel_summary}")
         if day_index == 0 and transport_summary:
             day_notes.append(f"Transport: {transport_summary}")
+        itinerary_notes.extend([f"Day {day_index + 1}: {note}" for note in day_notes if note])
 
         itinerary_days.append(
             {
@@ -61,7 +68,6 @@ def run(state: TripPlannerState) -> TripPlannerState:
                 "morning": morning_name or "Morning exploration",
                 "afternoon": afternoon_name or "Afternoon activity",
                 "evening": dining_options[day_index % len(dining_options)],
-                "notes": day_notes,
             }
         )
 
@@ -72,7 +78,32 @@ def run(state: TripPlannerState) -> TripPlannerState:
         "hotel_summary": hotel_summary,
         "transport_summary": transport_summary,
         "days": itinerary_days,
+        "notes": itinerary_notes,
     }
+
+    reasoning = (
+        f"Built a {trip_days}-day itinerary using {len(real_places)} real places (when available), "
+        "and integrated weather/hotel/transport summaries as daily notes."
+    )
+
+    if llm_service is not None and getattr(llm_service, "enabled", False):
+        try:
+            llm_reason = llm_service.chat_text(
+                system=(
+                    "You are an itinerary planner. Provide a short rationale for the day-wise plan in 2 sentences."
+                ),
+                user=(
+                    f"Prefs: {state.trip_preferences}\nWeather: {state.weather_data}\nHotels: {state.hotel_data}"
+                    f"\nTransport: {state.transport_data}\nPlaces: {state.places_data}\nItinerary: {state.itinerary}"
+                ),
+                timeout=12,
+            ).strip()
+            if llm_reason:
+                reasoning = llm_reason
+        except Exception:
+            pass
+
+    state.agent_reasoning["itinerary_agent"] = reasoning
     return state
 
 
@@ -105,6 +136,7 @@ def _extract_real_places(raw_places: List[Dict], destination: str) -> List[Dict]
             "name": name,
             "summary": summary or f"Visit this {place_type} in {destination}",
             "type": place_type,
+            "best_for": place.get("best_for", ""),
             "source": place.get("source", "local"),
         })
 
@@ -121,6 +153,13 @@ def _get_dining_suggestions(destination: str, interests: List[str]) -> List[str]
         f"Night market or pub crawl" if "nightlife" in interests else f"Evening dining and relaxation",
     ]
     return suggestions
+
+
+def _shorten(value: str, limit: int) -> str:
+    value = re.sub(r"\s+", " ", value or "").strip()
+    if len(value) <= limit:
+        return value
+    return value[: limit - 3].rstrip() + "..."
 
 
 def _is_spam_title(title: str) -> bool:

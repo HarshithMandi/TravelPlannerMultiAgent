@@ -18,11 +18,17 @@ class TransportService:
         duration = route_data.get("duration_min") or 0
 
         recommendations = []
-        if distance > 800:
+        destination_lower = (destination or "").lower()
+        island_destination = any(term in destination_lower for term in ["maldives", "andaman", "lakshadweep", "sri lanka", "bali"])
+
+        if island_destination:
+            recommendations.append({"mode": "flight", "reason": "Primary practical route for island destination"})
+            recommendations.append({"mode": "speedboat/ferry", "reason": "Common transfer from airport or capital to local islands/resorts"})
+        elif distance > 800:
             recommendations.append({"mode": "flight", "reason": "Long distance route"})
-        if distance > 150 and distance <= 800:
+        if not island_destination and distance > 150 and distance <= 800:
             recommendations.append({"mode": "train", "reason": "Balanced cost and time"})
-        if distance <= 150:
+        if not island_destination and distance <= 150:
             recommendations.append({"mode": "car", "reason": "Short route, flexible travel"})
         if transport_pref and all(item["mode"] != transport_pref for item in recommendations):
             recommendations.insert(0, {"mode": transport_pref, "reason": "User preference"})
@@ -35,5 +41,9 @@ class TransportService:
             "recommendations": recommendations,
             "budget_signal": "tight" if budget and budget < 20000 else "normal",
             "source": route_data.get("source", "routing"),
-            "summary": f"Route estimate {distance:.1f} km, {duration:.1f} min" if distance and duration else "Route estimate unavailable",
+            "summary": (
+                "Use flight plus island transfer; road distance is not meaningful for this destination"
+                if island_destination
+                else f"Route estimate {distance:.1f} km, {duration:.1f} min" if distance and duration else "Route estimate unavailable"
+            ),
         }

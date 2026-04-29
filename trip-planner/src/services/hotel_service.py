@@ -3,6 +3,7 @@ from typing import Dict, List, Optional
 
 import requests
 
+from src.services.duckduckgo_service import DuckDuckGoSearchService
 from src.services.geocoding_service import GeocodingService
 
 logger = logging.getLogger(__name__)
@@ -17,19 +18,41 @@ class HotelService:
 
     def __init__(self, geocoding_service: Optional[GeocodingService] = None):
         self.geocoding_service = geocoding_service or GeocodingService()
+        self.duckduckgo = DuckDuckGoSearchService()
 
-    def search_hotels(self, destination: str, budget: float, travel_type: str, preference: str, timeout: int = 20) -> Dict:
-        location = self.geocoding_service.geocode(destination)
-        if not location:
-            return {"source": "fallback", "hotels": []}
+    def search_hotels(self, destination: str, budget: float, travel_type: str, preference: str, timeout: int = 12) -> Dict:
+        hotels = self._search_duckduckgo_hotels(destination, preference, min(timeout, 6))
+        location_name = destination
+        if len(hotels) < 5:
+            location = self.geocoding_service.geocode(destination)
+            if location:
+                location_name = location.display_name
+                hotels.extend(self._search_overpass_hotels(location.lat, location.lon, min(timeout, 8)))
 
-        hotels = self._search_overpass_hotels(location.lat, location.lon, timeout)
+        if len(hotels) < 3:
+            hotels.extend(self._destination_fallback_hotels(destination, budget, preference))
+
         ranked = self._rank_hotels(hotels, budget=budget, travel_type=travel_type, preference=preference)
         return {
-            "source": "overpass",
-            "location": location.display_name,
-            "hotels": ranked[:10],
+            "source": "web",
+            "location": location_name,
+            "hotels": self._dedupe_hotels(ranked)[:10],
         }
+
+    def _search_duckduckgo_hotels(self, destination: str, preference: str, timeout: int) -> List[Dict]:
+        query = f"{destination} hotels {preference}".strip()
+        return [
+            {
+                "name": item.get("name"),
+                "type": "hotel",
+                "rating_hint": "web",
+                "summary": item.get("summary", ""),
+                "url": item.get("url", ""),
+                "source": "duckduckgo",
+            }
+            for item in self.duckduckgo.search(query, limit=7, timeout=timeout)
+            if item.get("name")
+        ]
 
     def _search_overpass_hotels(self, lat: float, lon: float, timeout: int) -> List[Dict]:
         query = f"""
@@ -80,3 +103,62 @@ class HotelService:
             return bonus
 
         return sorted(hotels, key=score, reverse=True)
+
+    def _dedupe_hotels(self, hotels: List[Dict]) -> List[Dict]:
+        seen = set()
+        unique = []
+        for hotel in hotels:
+            name = str(hotel.get("name") or "").strip()
+            if not name:
+                continue
+            key = name.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            unique.append(hotel)
+        return unique
+
+    def _destination_fallback_hotels(self, destination: str, budget: float, preference: str) -> List[Dict]:
+        lower = (destination or "").lower()
+        if "maldives" in lower:
+            budget_note = "For a tight INR budget, prioritize local-island guesthouses over private-island resorts."
+            return [
+                {
+                    "name": "Maafushi local-island guesthouses",
+                    "type": "guest_house",
+                    "rating_hint": "budget area",
+                    "summary": f"{budget_note} Maafushi is strong for beach access, snorkel tours, and lower transfer costs.",
+                    "source": "curated-fallback",
+                },
+                {
+                    "name": "Hulhumale airport-area hotels",
+                    "type": "hotel",
+                    "rating_hint": "arrival night",
+                    "summary": "Useful for late arrivals or early departures near Velana airport before moving to an island.",
+                    "source": "curated-fallback",
+                },
+                {
+                    "name": "Thulusdhoo guesthouses",
+                    "type": "guest_house",
+                    "rating_hint": "budget surf island",
+                    "summary": "Good for a casual beach base with surf, cafes, and public ferry/speedboat access.",
+                    "source": "curated-fallback",
+                },
+                {
+                    "name": "Gulhi beach guesthouses",
+                    "type": "guest_house",
+                    "rating_hint": "quiet budget island",
+                    "summary": "Smaller local-island option near Maafushi for quieter beaches and simple seafood meals.",
+                    "source": "curated-fallback",
+                },
+            ]
+
+        return [
+            {
+                "name": f"{destination} central budget stay",
+                "type": "hotel",
+                "rating_hint": "fallback",
+                "summary": f"Look near the main transport area and filter for {preference or 'clean, well-reviewed stays'}.",
+                "source": "generic-fallback",
+            }
+        ]

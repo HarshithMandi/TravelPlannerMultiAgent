@@ -9,6 +9,7 @@ class ReviewStatus(BaseModel):
 
 class PDFStatus(BaseModel):
     path: Optional[str] = None
+    pdf_path: Optional[str] = None
     generated: bool = False
 
 
@@ -16,6 +17,7 @@ class TripPlannerState(BaseModel):
     session_id: str
     user_profile: Dict = Field(default_factory=dict)
     trip_preferences: Dict = Field(default_factory=dict)
+    agent_reasoning: Dict[str, str] = Field(default_factory=dict)
     memory_context: Dict = Field(default_factory=dict)
     weather_data: Dict = Field(default_factory=dict)
     transport_data: Dict = Field(default_factory=dict)

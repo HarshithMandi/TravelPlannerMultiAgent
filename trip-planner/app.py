@@ -3,6 +3,7 @@ from src.config.settings import settings
 from src.services.llm_service import SarvamLLMService
 from src.services.embedding_service import OpenAIEmbeddingService
 from src.agents.orchestrator import Orchestrator
+from src.agents import pdf_agent
 from src.state.schemas import TripPlannerState
 import uuid
 import os
@@ -25,6 +26,8 @@ with st.sidebar.form("trip_form"):
     transport_pref = st.selectbox("Transport preference", ["flight","train","bus","car"], index=0)
     places_of_interest = st.text_area("Places of interest (comma separated)", value="beaches, nightlife, sightseeing")
     luxury = st.selectbox("Luxury vs Budget", ["budget","luxury"], index=0)
+    use_memory = st.checkbox("Use memory personalization")
+    remember_preferences = st.checkbox("Save preferences for future trips")
     debug = st.checkbox("Debug mode (show graph state)")
     submitted = st.form_submit_button("Plan Trip")
 
@@ -45,6 +48,8 @@ if submitted:
             "transport_pref": transport_pref,
             "places_of_interest": [p.strip() for p in places_of_interest.split(',') if p.strip()],
             "luxury": luxury,
+            "use_memory": use_memory,
+            "remember_preferences": remember_preferences,
         }
     )
 
@@ -69,8 +74,12 @@ if submitted:
     with st.spinner("Running planner..."):
         result_state = orchestrator.run(state, debug=debug)
 
+    st.session_state["last_result_state"] = result_state
     st.success("Planning complete")
 
+result_state = st.session_state.get("last_result_state")
+
+if result_state:
     if debug:
         st.subheader("Graph State (raw)")
         st.json(result_state.model_dump())
@@ -82,7 +91,15 @@ if submitted:
     st.subheader("Itinerary")
     st.write(result_state.itinerary or {})
 
-    if result_state.pdf_status and result_state.pdf_status.path:
-        txt_path = result_state.pdf_status.path
-        with open(txt_path, "r", encoding="utf-8") as f:
-            st.download_button("Download TXT Report", f, file_name=os.path.basename(txt_path))
+    st.subheader("Report")
+    if st.button("Generate Downloadable Report"):
+        with st.spinner("Generating report..."):
+            result_state = pdf_agent.run(result_state)
+            st.session_state["last_result_state"] = result_state
+
+    if result_state.pdf_status and result_state.pdf_status.generated:
+        pdf_path = result_state.pdf_status.pdf_path or result_state.pdf_status.path
+
+        if pdf_path:
+            with open(pdf_path, "rb") as f:
+                st.download_button("Download PDF Report", f, file_name=os.path.basename(pdf_path))

@@ -3,13 +3,16 @@ from __future__ import annotations
 from typing import Dict, List, Optional
 import logging
 from src.state.schemas import TripPlannerState
-from src.agents import user_input_agent, memory_agent, weather_agent, transport_agent, hotel_agent, places_agent, budget_agent, itinerary_agent, final_review_agent, pdf_agent
+from src.agents import user_input_agent, memory_agent, weather_agent, transport_agent, hotel_agent, places_agent, budget_agent, itinerary_agent, final_review_agent
 from src.services.geocoding_service import GeocodingService
 from src.services.weather_service import WeatherService
 from src.services.routing_service import RoutingService
 from src.services.places_service import PlacesService
 from src.services.hotel_service import HotelService
 from src.services.transport_service import TransportService
+
+from src.agents import memory_update_agent
+from src.config.settings import settings
 
 from langgraph.graph import END, StateGraph
 
@@ -26,12 +29,22 @@ class Orchestrator:
     def __init__(self, llm_service=None, embedding_service=None):
         self.llm = llm_service
         self.embed = embedding_service
+        llm_enabled = getattr(settings, "WORKER_LLM_ENABLED", False) and getattr(settings, "AGENT_REASONING_LLM_ENABLED", False)
+        self.worker_llm = self.llm if llm_enabled else None
         self.geocoding_service = GeocodingService()
         self.weather_service = WeatherService(self.geocoding_service)
         self.routing_service = RoutingService(self.geocoding_service)
         self.places_service = PlacesService(self.geocoding_service)
         self.hotel_service = HotelService(self.geocoding_service)
         self.transport_service = TransportService(self.routing_service)
+
+        self.memory_store = None
+        if getattr(settings, "MEMORY_ENABLED", False) or getattr(settings, "MEMORY_UPDATE_ENABLED", False):
+            from src.services.memory_store import ChromaMemoryStore
+
+            self.memory_store = ChromaMemoryStore(
+                persist_dir=settings.CHROMA_PERSIST_DIR,
+            )
 
         self._graph = self._build_graph()
 
@@ -73,6 +86,19 @@ class Orchestrator:
     def _needs_budget(self, state: TripPlannerState) -> bool:
         return not bool(state.budget_summary)
 
+    def _has_stable_memory_user(self, state: TripPlannerState) -> bool:
+        return bool((state.user_profile or {}).get("user_id"))
+
+    def _memory_lookup_enabled(self, state: TripPlannerState) -> bool:
+        prefs = state.trip_preferences or {}
+        opted_in = bool(prefs.get("use_memory") or prefs.get("remember_preferences"))
+        return bool(getattr(settings, "MEMORY_ENABLED", False) and self.embed is not None and self.memory_store is not None and (opted_in or self._has_stable_memory_user(state)))
+
+    def _memory_update_enabled(self, state: TripPlannerState) -> bool:
+        prefs = state.trip_preferences or {}
+        opted_in = bool(prefs.get("remember_preferences"))
+        return bool(getattr(settings, "MEMORY_UPDATE_ENABLED", False) and self.embed is not None and self.memory_store is not None and (opted_in or self._has_stable_memory_user(state)))
+
     def _supervisor(self, state: TripPlannerState) -> TripPlannerState:
         completed = set(self._completed_agents(state))
 
@@ -90,7 +116,7 @@ class Orchestrator:
             state.orchestrator_decision["next"] = "finalize"
             return state
 
-        if "memory_agent" not in completed:
+        if self._memory_lookup_enabled(state) and "memory_agent" not in completed:
             self._record_decision(state, ["memory_agent"], "Retrieve memory context")
             state.orchestrator_decision["next"] = "memory_agent"
             return state
@@ -146,9 +172,9 @@ class Orchestrator:
                 state.orchestrator_decision["next"] = "itinerary_agent"
                 return state
 
-        if state.review_status.approved and not (state.pdf_status and state.pdf_status.generated):
-            self._record_decision(state, ["pdf_agent"], "Approved: generate report")
-            state.orchestrator_decision["next"] = "pdf_agent"
+        if state.review_status.approved and self._memory_update_enabled(state) and "memory_update_agent" not in completed:
+            self._record_decision(state, ["memory_update_agent"], "Approved: persist preferences to memory")
+            state.orchestrator_decision["next"] = "memory_update_agent"
             return state
 
         self._record_decision(state, [], "Done")
@@ -162,7 +188,7 @@ class Orchestrator:
         return "finalize"
 
     def _node_user_input(self, state: TripPlannerState) -> TripPlannerState:
-        state = user_input_agent.run(state)
+        state = user_input_agent.run(state, llm_service=self.worker_llm)
         self._mark_completed(state, "user_input_agent")
         return state
 
@@ -170,48 +196,59 @@ class Orchestrator:
         if self.embed is None:
             state.memory_context = {"note": "Embedding service not configured"}
         else:
-            state = memory_agent.run(state, embedding_service=self.embed)
+            state = memory_agent.run(
+                state,
+                embedding_service=self.embed,
+                memory_store=self.memory_store,
+                llm_service=self.worker_llm,
+                top_k=getattr(settings, "MEMORY_TOP_K", 1),
+            )
         self._mark_completed(state, "memory_agent")
         return state
 
     def _node_weather(self, state: TripPlannerState) -> TripPlannerState:
-        state = weather_agent.run(state, weather_service=self.weather_service)
+        state = weather_agent.run(state, weather_service=self.weather_service, llm_service=self.worker_llm)
         self._mark_completed(state, "weather_agent")
         return state
 
     def _node_transport(self, state: TripPlannerState) -> TripPlannerState:
-        state = transport_agent.run(state, transport_service=self.transport_service)
+        state = transport_agent.run(state, transport_service=self.transport_service, llm_service=self.worker_llm)
         self._mark_completed(state, "transport_agent")
         return state
 
     def _node_hotel(self, state: TripPlannerState) -> TripPlannerState:
-        state = hotel_agent.run(state, hotel_service=self.hotel_service)
+        state = hotel_agent.run(state, hotel_service=self.hotel_service, llm_service=self.worker_llm)
         self._mark_completed(state, "hotel_agent")
         return state
 
     def _node_places(self, state: TripPlannerState) -> TripPlannerState:
-        state = places_agent.run(state, places_service=self.places_service)
+        state = places_agent.run(state, places_service=self.places_service, llm_service=self.worker_llm)
         self._mark_completed(state, "places_agent")
         return state
 
     def _node_budget(self, state: TripPlannerState) -> TripPlannerState:
-        state = budget_agent.run(state)
+        state = budget_agent.run(state, llm_service=self.worker_llm)
         self._mark_completed(state, "budget_agent")
         return state
 
     def _node_itinerary(self, state: TripPlannerState) -> TripPlannerState:
-        state = itinerary_agent.run(state)
+        state = itinerary_agent.run(state, llm_service=self.worker_llm)
         self._mark_completed(state, "itinerary_agent")
         return state
 
     def _node_final_review(self, state: TripPlannerState) -> TripPlannerState:
-        state = final_review_agent.run(state)
+        state = final_review_agent.run(state, llm_service=self.worker_llm)
         self._mark_completed(state, "final_review_agent")
         return state
 
-    def _node_pdf(self, state: TripPlannerState) -> TripPlannerState:
-        state = pdf_agent.run(state)
-        self._mark_completed(state, "pdf_agent")
+    def _node_memory_update(self, state: TripPlannerState) -> TripPlannerState:
+        state = memory_update_agent.run(
+            state,
+            embedding_service=self.embed,
+            memory_store=self.memory_store,
+            llm_service=self.worker_llm,
+        )
+        self._mark_completed(state, "memory_update_agent")
         return state
 
     def _node_finalize(self, state: TripPlannerState) -> TripPlannerState:
@@ -238,7 +275,7 @@ class Orchestrator:
         graph.add_node("budget_agent", self._node_budget)
         graph.add_node("itinerary_agent", self._node_itinerary)
         graph.add_node("final_review_agent", self._node_final_review)
-        graph.add_node("pdf_agent", self._node_pdf)
+        graph.add_node("memory_update_agent", self._node_memory_update)
         graph.add_node("finalize", self._node_finalize)
 
         graph.set_entry_point("supervisor")
@@ -256,7 +293,7 @@ class Orchestrator:
                 "budget_agent": "budget_agent",
                 "itinerary_agent": "itinerary_agent",
                 "final_review_agent": "final_review_agent",
-                "pdf_agent": "pdf_agent",
+                "memory_update_agent": "memory_update_agent",
                 "finalize": "finalize",
             },
         )
@@ -272,7 +309,7 @@ class Orchestrator:
             "budget_agent",
             "itinerary_agent",
             "final_review_agent",
-            "pdf_agent",
+            "memory_update_agent",
         ]:
             graph.add_edge(worker, "supervisor")
 
@@ -280,8 +317,30 @@ class Orchestrator:
         return graph.compile()
 
     def run(self, state: TripPlannerState, debug: bool = False) -> TripPlannerState:
+        invoke_config = None
         try:
-            result = self._graph.invoke(state)
+            if getattr(settings, "LANGSMITH_TRACING", False) and getattr(settings, "LANGSMITH_API_KEY", ""):
+                from langchain_core.tracers.langchain import LangChainTracer
+
+                tracer = LangChainTracer()
+                invoke_config = {
+                    "callbacks": [tracer],
+                    "run_name": f"trip_planner:{state.session_id}",
+                    "tags": ["trip-planner", "langgraph"],
+                    "metadata": {
+                        "session_id": state.session_id,
+                        "destination": (state.trip_preferences or {}).get("destination"),
+                    },
+                }
+        except Exception:
+            # Never block planning on tracing configuration.
+            invoke_config = None
+
+        try:
+            if invoke_config:
+                result = self._graph.invoke(state, config=invoke_config)
+            else:
+                result = self._graph.invoke(state)
         except Exception:
             logger.exception("LangGraph orchestration failed")
             raise

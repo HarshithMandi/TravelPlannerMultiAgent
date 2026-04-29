@@ -1,7 +1,11 @@
 from src.state.schemas import TripPlannerState
+from src.services.llm_service import SarvamLLMService
 
 
-def run(state: TripPlannerState) -> TripPlannerState:
+from typing import Optional
+
+
+def run(state: TripPlannerState, llm_service: Optional[SarvamLLMService] = None) -> TripPlannerState:
     # Very simple budget estimation: sum hotel+transport rough estimates
     hotel_est = 0
     hotel_candidates = []
@@ -25,5 +29,26 @@ def run(state: TripPlannerState) -> TripPlannerState:
 
     transport_est = 8000
     total_est = hotel_est + transport_est
-    state.budget_summary = {"estimated_total": total_est, "within_budget": total_est <= state.trip_preferences.get("budget", 0)}
+    budget_limit = float(state.trip_preferences.get("budget", 0) or 0)
+    within = total_est <= budget_limit
+    state.budget_summary = {"estimated_total": total_est, "within_budget": within}
+
+    reasoning = (
+        f"Estimated total ~{total_est:.0f} (hotel ~{hotel_est:.0f} + transport ~{transport_est:.0f}) "
+        f"vs budget {budget_limit:.0f} => within_budget={within}."
+    )
+
+    if llm_service is not None and getattr(llm_service, "enabled", False):
+        try:
+            llm_reason = llm_service.chat_text(
+                system="You are a travel budget optimizer. Provide a short budget rationale and 1 suggestion.",
+                user=f"Prefs: {state.trip_preferences}\nHotel data: {state.hotel_data}\nTransport data: {state.transport_data}\nComputed: {state.budget_summary}",
+                timeout=10,
+            ).strip()
+            if llm_reason:
+                reasoning = llm_reason
+        except Exception:
+            pass
+
+    state.agent_reasoning["budget_agent"] = reasoning
     return state
