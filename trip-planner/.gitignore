@@ -4,9 +4,13 @@ venv/
 __pycache__/
 *.pyc
 data/chroma/
+**/data/chroma/
+data/memory_store.json
+**/data/memory_store.json
 logs/
 output/*.pdf
 output/*.txt
 .pytest_cache/
 .DS_Store
 .streamlit/secrets.toml
+.gitignore

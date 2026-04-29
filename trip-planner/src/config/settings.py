@@ -69,6 +69,7 @@ class Settings:
     OPENWEATHERMAP_API_KEY: str = ""
     OPENTRIPMAP_API_KEY: str = ""
     OPENROUTESERVICE_API_KEY: str = ""
+    GEOAPIFY_API_KEY: str = ""
     REDIS_URL: str = ""
     CHROMA_PERSIST_DIR: str = "./data/chroma"
     MEMORY_MAX_ENTRIES: int = 200
@@ -93,6 +94,12 @@ settings = Settings(
     OPENWEATHERMAP_API_KEY=os.getenv("OPENWEATHERMAP_API_KEY", ""),
     OPENTRIPMAP_API_KEY=os.getenv("OPENTRIPMAP_API_KEY", ""),
     OPENROUTESERVICE_API_KEY=os.getenv("OPENROUTESERVICE_API_KEY", ""),
+    GEOAPIFY_API_KEY=(
+        os.getenv("GEOAPIFY_API_KEY")
+        or os.getenv("GEOAPIFY_KEY")
+        or os.getenv("GEOAPIFY_APIKEY")
+        or ""
+    ).strip(),
     REDIS_URL=os.getenv("REDIS_URL", ""),
     CHROMA_PERSIST_DIR=os.getenv("CHROMA_PERSIST_DIR", "./data/chroma"),
     MEMORY_MAX_ENTRIES=int(os.getenv("MEMORY_MAX_ENTRIES", "200")),

@@ -3,6 +3,7 @@ from typing import Dict, List, Optional
 
 import requests
 
+from src.config.settings import settings
 from src.services.duckduckgo_service import DuckDuckGoSearchService
 from src.services.geocoding_service import GeocodingService
 
@@ -21,12 +22,19 @@ class HotelService:
         self.duckduckgo = DuckDuckGoSearchService()
 
     def search_hotels(self, destination: str, budget: float, travel_type: str, preference: str, timeout: int = 12) -> Dict:
-        hotels = self._search_duckduckgo_hotels(destination, preference, min(timeout, 6))
+        hotels = []
         location_name = destination
+        location = self.geocoding_service.geocode(destination)
+        if location:
+            location_name = location.display_name
+            if settings.GEOAPIFY_API_KEY:
+                hotels.extend(self._search_geoapify_hotels(location.lat, location.lon, min(timeout, 8)))
+
         if len(hotels) < 5:
-            location = self.geocoding_service.geocode(destination)
+            hotels.extend(self._search_duckduckgo_hotels(destination, preference, min(timeout, 6)))
+
+        if len(hotels) < 5:
             if location:
-                location_name = location.display_name
                 hotels.extend(self._search_overpass_hotels(location.lat, location.lon, min(timeout, 8)))
 
         if len(hotels) < 3:
@@ -38,6 +46,52 @@ class HotelService:
             "location": location_name,
             "hotels": self._dedupe_hotels(ranked)[:10],
         }
+
+    def _search_geoapify_hotels(self, lat: float, lon: float, timeout: int) -> List[Dict]:
+        url = "https://api.geoapify.com/v2/places"
+        params = {
+            "categories": "accommodation.hotel,accommodation.guest_house,accommodation.hostel,accommodation.apartment",
+            "filter": f"circle:{lon},{lat},15000",
+            "bias": f"proximity:{lon},{lat}",
+            "limit": 20,
+            "apiKey": settings.GEOAPIFY_API_KEY,
+        }
+        headers = {"Accept": "application/json"}
+        try:
+            response = requests.get(url, params=params, headers=headers, timeout=timeout)
+            response.raise_for_status()
+            results = []
+            for feature in response.json().get("features", []):
+                props = feature.get("properties", {}) or {}
+                name = props.get("name") or props.get("address_line1")
+                if not name:
+                    continue
+                categories = props.get("categories") or []
+                results.append(
+                    {
+                        "name": name,
+                        "type": self._geoapify_hotel_type(categories),
+                        "rating_hint": props.get("datasource", {}).get("raw", {}).get("stars") or "geoapify",
+                        "summary": props.get("formatted") or props.get("address_line2") or "",
+                        "lat": props.get("lat"),
+                        "lon": props.get("lon"),
+                        "source": "geoapify",
+                    }
+                )
+            return results
+        except Exception as exc:
+            logger.warning("Geoapify hotel search failed: %s", exc)
+            return []
+
+    def _geoapify_hotel_type(self, categories: List[str]) -> str:
+        category_text = " ".join(categories or [])
+        if "guest_house" in category_text:
+            return "guest_house"
+        if "hostel" in category_text:
+            return "hostel"
+        if "apartment" in category_text:
+            return "apartment"
+        return "hotel"
 
     def _search_duckduckgo_hotels(self, destination: str, preference: str, timeout: int) -> List[Dict]:
         query = f"{destination} hotels {preference}".strip()

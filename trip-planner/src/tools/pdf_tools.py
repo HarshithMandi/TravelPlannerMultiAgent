@@ -2,8 +2,8 @@ import os
 import textwrap
 from typing import Dict, List, Tuple
 
-from pypdf import PdfWriter
-from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas
 
 from src.state.schemas import TripPlannerState
 
@@ -212,68 +212,32 @@ def _render_notes(
 
 
 def _write_pdf(path: str, lines: List[str]) -> None:
-    writer = PdfWriter()
-    page_width = 595
-    page_height = 842
-    margin_x = 40
-    start_y = page_height - 50
+    pdf = canvas.Canvas(path, pagesize=A4)
+    _, page_height = A4
+    x = 40
+    y = page_height - 50
     line_height = 14
-    font_size = 10
-    max_lines_per_page = int((start_y - 50) / line_height)
 
-    font = DictionaryObject(
-        {
-            NameObject("/Type"): NameObject("/Font"),
-            NameObject("/Subtype"): NameObject("/Type1"),
-            NameObject("/BaseFont"): NameObject("/Helvetica"),
-        }
-    )
-    font_ref = writer._add_object(font)
-
-    wrapped_lines = _wrap_pdf_lines(lines) or [""]
-    for start in range(0, len(wrapped_lines), max_lines_per_page):
-        page_lines = wrapped_lines[start : start + max_lines_per_page]
-        page = writer.add_blank_page(width=page_width, height=page_height)
-        page[NameObject("/Resources")] = DictionaryObject(
-            {
-                NameObject("/Font"): DictionaryObject(
-                    {
-                        NameObject("/F1"): font_ref,
-                    }
-                )
-            }
-        )
-        stream = DecodedStreamObject()
-        stream.set_data(_build_pdf_text_stream(page_lines, margin_x, start_y, line_height, font_size))
-        page[NameObject("/Contents")] = writer._add_object(stream)
-
-    with open(path, "wb") as file:
-        writer.write(file)
+    pdf.setFont("Helvetica", 10)
+    for line in _wrap_lines(lines):
+        if y < 50:
+            pdf.showPage()
+            pdf.setFont("Helvetica", 10)
+            y = page_height - 50
+        pdf.drawString(x, y, _pdf_safe_text(line))
+        y -= line_height
+    pdf.save()
 
 
-def _wrap_pdf_lines(lines: List[str], width: int = 92) -> List[str]:
+def _wrap_lines(lines: List[str], width: int = 92) -> List[str]:
     wrapped: List[str] = []
     for line in lines:
-        text = _pdf_safe_text(line)
+        text = _safe_str(line)
         if not text:
             wrapped.append("")
             continue
-        wrapped.extend(textwrap.wrap(text, width=width, replace_whitespace=False, drop_whitespace=False) or [""])
+        wrapped.extend(textwrap.wrap(text, width=width) or [""])
     return wrapped
-
-
-def _build_pdf_text_stream(lines: List[str], x: int, y: int, line_height: int, font_size: int) -> bytes:
-    commands = ["BT", f"/F1 {font_size} Tf", f"{x} {y} Td"]
-    for index, line in enumerate(lines):
-        if index:
-            commands.append(f"0 -{line_height} Td")
-        commands.append(f"({_escape_pdf_text(line)}) Tj")
-    commands.append("ET")
-    return "\n".join(commands).encode("latin-1", errors="replace")
-
-
-def _escape_pdf_text(value: str) -> str:
-    return value.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
 
 
 def _pdf_safe_text(value) -> str:
