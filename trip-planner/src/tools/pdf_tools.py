@@ -1,27 +1,207 @@
 import os
-import textwrap
-from typing import Dict, List, Tuple
+from typing import Any, Dict, Iterable, List, Sequence, Tuple
+from xml.sax.saxutils import escape
 
+from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.pagesizes import A4
-from reportlab.pdfgen import canvas
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib.units import mm
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from src.state.schemas import TripPlannerState
 
 
-def _safe_str(value) -> str:
+def _safe_str(value: Any) -> str:
     if value is None:
         return ""
     return str(value)
 
 
-def _lines_from_kv(title: str, items: List[Tuple[str, str]]) -> List[str]:
-    lines: List[str] = [title, "-" * 60]
-    for key, value in items:
-        text = _safe_str(value).strip()
-        if text:
-            lines.append(f"{key}: {text}")
-    lines.append("")
-    return lines
+def _compact_text(value: Any) -> str:
+    text = _safe_str(value)
+    replacements = {
+        "\r": " ",
+        "\n": " ",
+        "\t": " ",
+        "₹": "INR ",
+        "→": "->",
+        "°": " deg",
+        "–": "-",
+        "—": "-",
+        "’": "'",
+        "“": '"',
+        "”": '"',
+    }
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+    return " ".join(text.split())
+
+
+def _format_number(value: Any) -> str:
+    try:
+        if value is None or value == "":
+            return "N/A"
+        if isinstance(value, bool):
+            return "Yes" if value else "No"
+        if isinstance(value, (int, float)):
+            if isinstance(value, float) and value.is_integer():
+                value = int(value)
+            return f"{value:,}"
+    except Exception:
+        pass
+    return _compact_text(value) or "N/A"
+
+
+def _format_money(value: Any) -> str:
+    if value is None or value == "":
+        return "N/A"
+    if isinstance(value, (int, float)):
+        if isinstance(value, float) and value.is_integer():
+            value = int(value)
+        return f"INR {value:,}"
+    return _compact_text(value)
+
+
+def _as_list(value: Any) -> List[Any]:
+    if isinstance(value, list):
+        return value
+    if value in (None, ""):
+        return []
+    return [value]
+
+
+def _styles():
+    styles = getSampleStyleSheet()
+    styles.add(
+        ParagraphStyle(
+            name="ReportTitle",
+            parent=styles["Title"],
+            fontName="Helvetica-Bold",
+            fontSize=20,
+            leading=24,
+            alignment=TA_CENTER,
+            textColor=colors.HexColor("#17324d"),
+            spaceAfter=4,
+        )
+    )
+    styles.add(
+        ParagraphStyle(
+            name="ReportSubtitle",
+            parent=styles["BodyText"],
+            fontName="Helvetica",
+            fontSize=9,
+            leading=12,
+            alignment=TA_CENTER,
+            textColor=colors.HexColor("#4b5563"),
+            spaceAfter=10,
+        )
+    )
+    styles.add(
+        ParagraphStyle(
+            name="SectionHeading",
+            parent=styles["Heading2"],
+            fontName="Helvetica-Bold",
+            fontSize=13,
+            leading=16,
+            textColor=colors.HexColor("#0f3b57"),
+            spaceBefore=6,
+            spaceAfter=6,
+        )
+    )
+    styles.add(
+        ParagraphStyle(
+            name="SectionNote",
+            parent=styles["BodyText"],
+            fontName="Helvetica",
+            fontSize=9,
+            leading=12,
+            textColor=colors.HexColor("#4b5563"),
+            spaceAfter=6,
+        )
+    )
+    styles.add(
+        ParagraphStyle(
+            name="TableHeader",
+            parent=styles["BodyText"],
+            fontName="Helvetica-Bold",
+            fontSize=9,
+            leading=11,
+            textColor=colors.white,
+        )
+    )
+    styles.add(
+        ParagraphStyle(
+            name="TableBody",
+            parent=styles["BodyText"],
+            fontName="Helvetica",
+            fontSize=8.5,
+            leading=10.5,
+            textColor=colors.black,
+        )
+    )
+    styles.add(
+        ParagraphStyle(
+            name="BulletBody",
+            parent=styles["BodyText"],
+            fontName="Helvetica",
+            fontSize=8.5,
+            leading=11,
+            leftIndent=10,
+            firstLineIndent=-6,
+            spaceAfter=2,
+        )
+    )
+    return styles
+
+
+def _section_heading(title: str, styles) -> List[Any]:
+    return [Paragraph(title, styles["SectionHeading"]), Spacer(1, 3)]
+
+
+def _table(rows: Sequence[Sequence[Any]], styles, col_widths: Sequence[float], header_rows: int = 1) -> Table:
+    data: List[List[Any]] = []
+    for row_index, row in enumerate(rows):
+        style_name = "TableHeader" if row_index < header_rows else "TableBody"
+        data.append([Paragraph(escape(_compact_text(cell) or "N/A"), styles[style_name]) for cell in row])
+
+    table = Table(data, colWidths=list(col_widths), repeatRows=header_rows)
+    table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#17324d")),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+                ("LEADING", (0, 0), (-1, -1), 10.5),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.whitesmoke, colors.HexColor("#eef3f7")]),
+                ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#b6c2cf")),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                ("TOPPADDING", (0, 0), (-1, -1), 5),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ]
+        )
+    )
+    return table
+
+
+def _kv_rows(pairs: Iterable[Tuple[str, Any]]) -> List[List[Any]]:
+    return [[key, value] for key, value in pairs]
+
+
+def _page_decorations(canvas, doc):
+    canvas.saveState()
+    width, height = A4
+    canvas.setStrokeColor(colors.HexColor("#d0d7de"))
+    canvas.setLineWidth(0.6)
+    canvas.line(doc.leftMargin, height - 18 * mm, width - doc.rightMargin, height - 18 * mm)
+    canvas.setFont("Helvetica", 8)
+    canvas.setFillColor(colors.HexColor("#6b7280"))
+    canvas.drawString(doc.leftMargin, 10 * mm, "Trip Planner Report")
+    canvas.drawRightString(width - doc.rightMargin, 10 * mm, f"Page {canvas.getPageNumber()}")
+    canvas.restoreState()
 
 
 def _food_suggestions(destination: str, food_pref: str) -> Dict:
@@ -80,181 +260,224 @@ def _travel_recommendations(prefs: Dict, itinerary: Dict) -> Dict:
     return {"recommendations": recs}
 
 
-def _render_hotels(hotel_data: Dict) -> List[str]:
-    hotels = (hotel_data or {}).get("suggestions") or (hotel_data or {}).get("hotels") or []
-    lines = ["HOTEL(S) OF STAY", "-" * 60]
+def _build_trip_basic_details(state: TripPlannerState, styles) -> List[Any]:
+    prefs = state.trip_preferences or {}
+    rows = _kv_rows(
+        [
+            ("Session ID", state.session_id),
+            ("From", f"{prefs.get('source') or 'N/A'} -> {prefs.get('destination') or 'N/A'}"),
+            ("Dates", f"{prefs.get('start_date') or 'N/A'} to {prefs.get('end_date') or 'N/A'}"),
+            ("Budget", _format_money(prefs.get('budget'))),
+            ("Travelers", _format_number(prefs.get('travelers'))),
+            ("Travel type", prefs.get('travel_type')),
+            ("Hotel preference", prefs.get('hotel_pref')),
+            ("Food preference", prefs.get('food_pref')),
+            ("Transport preference", prefs.get('transport_pref')),
+            ("Interests", ", ".join([_compact_text(item) for item in _as_list(prefs.get('places_of_interest')) if _compact_text(item)])),
+            ("Luxury level", prefs.get('luxury')),
+            ("Use memory", "Yes" if prefs.get('use_memory') else "No"),
+            ("Save preferences", "Yes" if prefs.get('remember_preferences') else "No"),
+            ("Review status", "Approved" if state.review_status.approved else "Needs attention"),
+        ]
+    )
+    return [*_section_heading("Trip Basic Details", styles), _table([["Field", "Value"], *rows], styles, col_widths=[48 * mm, 122 * mm]), Spacer(1, 6)]
+
+
+def _build_flight_details(state: TripPlannerState, styles) -> List[Any]:
+    prefs = state.trip_preferences or {}
+    transport_data = state.transport_data or {}
+    route = transport_data.get("route") or {}
+    recommendations = transport_data.get("recommendations") or []
+    flight_details = transport_data.get("flight_details") or {}
+    top = flight_details if flight_details else (recommendations[0] if recommendations else {})
+
+    rows = _kv_rows(
+        [
+            ("Recommended mode", flight_details.get("recommended_mode") or top.get("mode") or prefs.get("transport_pref") or "N/A"),
+            ("Reason", flight_details.get("reason") or top.get("reason") or transport_data.get("summary") or "N/A"),
+            ("Route source", route.get("source") or transport_data.get("source") or "routing"),
+            ("Distance (km)", route.get("distance_km")),
+            ("Duration (min)", route.get("duration_min")),
+            ("Budget signal", transport_data.get("budget_signal")),
+            ("Summary", flight_details.get("summary") or transport_data.get("summary") or "N/A"),
+        ]
+    )
+
+    content: List[Any] = [
+        *_section_heading("Flight Details from Agent", styles),
+        Paragraph(
+            "This section reflects the transport agent output. If live flight inventory is unavailable, it summarizes the recommended travel mode and route estimate instead of inventing ticket-level data.",
+            styles["SectionNote"],
+        ),
+        _table([["Field", "Value"], *rows], styles, col_widths=[48 * mm, 122 * mm]),
+        Spacer(1, 4),
+    ]
+
+    option_rows: List[List[Any]] = [["Mode", "Reason"]]
+    for rec in recommendations[:6]:
+        option_rows.append([rec.get("mode") or "N/A", rec.get("reason") or "N/A"])
+
+    if len(option_rows) > 1:
+        content.extend([Paragraph("Transport options", styles["SectionNote"]), _table(option_rows, styles, col_widths=[42 * mm, 128 * mm])])
+    else:
+        content.append(Paragraph("No transport options were returned by the agent.", styles["SectionNote"]))
+
+    content.append(Spacer(1, 6))
+    return content
+
+
+def _build_hotel_details(state: TripPlannerState, styles) -> List[Any]:
+    hotel_data = state.hotel_data or {}
+    hotels = hotel_data.get("suggestions") or hotel_data.get("hotels") or []
+
+    content: List[Any] = [
+        *_section_heading("Hotel Details", styles),
+        _table(
+            [["Field", "Value"], ["Location", hotel_data.get("location") or "N/A"], ["Source", hotel_data.get("source") or "N/A"], ["Count", len(hotels)]],
+            styles,
+            col_widths=[48 * mm, 122 * mm],
+        ),
+        Spacer(1, 4),
+    ]
+
     if not hotels:
-        lines.append("No hotel recommendations available")
-        lines.append("")
-        return lines
+        content.append(Paragraph("No hotel suggestions were returned by the agent.", styles["SectionNote"]))
+        content.append(Spacer(1, 6))
+        return content
 
-    for hotel in hotels[:10]:
-        name = hotel.get("name") or "Hotel"
-        summary = hotel.get("summary") or ""
-        rating_hint = hotel.get("rating_hint") or hotel.get("stars") or ""
-        hotel_type = hotel.get("type") or ""
-        source = hotel.get("source") or ""
-        suffix = f" ({rating_hint})" if rating_hint else ""
-        lines.append(f"- {name}{suffix}")
-        if hotel_type or source:
-            lines.append(f"  Type/source: {hotel_type or 'stay'} / {source or 'web'}")
-        if summary:
-            lines.append(f"  {summary}")
-    lines.append("")
-    return lines
+    hotel_rows: List[List[Any]] = [["Name", "Type / Rating", "Summary"]]
+    for hotel in hotels[:8]:
+        type_bits = [hotel.get("type"), hotel.get("rating_hint"), hotel.get("source")]
+        type_text = " | ".join([_compact_text(bit) for bit in type_bits if _compact_text(bit)]) or "N/A"
+        hotel_rows.append([hotel.get("name") or "N/A", type_text, hotel.get("summary") or "N/A"])
+
+    content.append(_table(hotel_rows, styles, col_widths=[48 * mm, 44 * mm, 78 * mm]))
+    content.append(Spacer(1, 6))
+    return content
 
 
-def _render_transport(transport_data: Dict) -> List[str]:
-    route = (transport_data or {}).get("route") or {}
-    recs = (transport_data or {}).get("recommendations") or []
-    summary = (transport_data or {}).get("summary") or ""
-    lines = ["FLIGHT INFORMATION TO AND FRO", "-" * 60]
-    if summary:
-        lines.append(f"Summary: {summary}")
-    if route:
-        lines.append(f"Route data source: {route.get('source', 'routing')}")
-        if "road distance is not meaningful" not in summary.lower():
-            lines.append(f"Distance (km): {route.get('distance_km')}")
-            lines.append(f"Duration (min): {route.get('duration_min')}")
-    else:
-        lines.append("Route estimate unavailable")
+def _build_tourist_locations(state: TripPlannerState, styles) -> List[Any]:
+    places_data = state.places_data or {}
+    places = places_data.get("places") or []
 
-    if recs:
-        lines.append("Outbound options:")
-        for rec in recs[:8]:
-            mode = rec.get("mode") or ""
-            reason = rec.get("reason") or ""
-            lines.append(f"- {mode}: {reason}".strip(" :"))
-        lines.append("Return options:")
-        for rec in recs[:8]:
-            mode = rec.get("mode") or ""
-            reason = rec.get("reason") or ""
-            lines.append(f"- {mode}: Same route in reverse; {reason}".strip(" :"))
-    else:
-        lines.append("No flight/transport suggestions available")
-    lines.append("")
-    return lines
+    content: List[Any] = [
+        *_section_heading("Tourist Locations", styles),
+        _table(
+            [["Field", "Value"], ["Location", places_data.get("location") or "N/A"], ["Requested interests", ", ".join([_compact_text(item) for item in _as_list(places_data.get("requested_interests")) if _compact_text(item)]) or "N/A"], ["Source", places_data.get("source") or "N/A"], ["Count", len(places)]],
+            styles,
+            col_widths=[48 * mm, 122 * mm],
+        ),
+        Spacer(1, 4),
+    ]
 
-
-def _render_places(places_data: Dict) -> List[str]:
-    places = (places_data or {}).get("places") or []
-    lines = ["PLACES TO VISIT IN THE AREA", "-" * 60]
     if not places:
-        lines.append("No attractions found")
-        lines.append("")
-        return lines
+        content.append(Paragraph("No tourist locations were returned by the agent.", styles["SectionNote"]))
+        content.append(Spacer(1, 6))
+        return content
 
-    for place in places[:12]:
-        name = place.get("name") or "Attraction"
-        details = []
-        if place.get("type"):
-            details.append(place.get("type"))
-        if place.get("best_for"):
-            details.append(f"best for {place.get('best_for')}")
-        if place.get("source"):
-            details.append(f"source: {place.get('source')}")
+    place_rows: List[List[Any]] = [["Name", "Type / Best for", "Summary / Source"]]
+    for place in places[:10]:
+        best_for = _compact_text(place.get("best_for"))
+        meta_bits = [place.get("type"), best_for]
+        meta_text = " | ".join([_compact_text(bit) for bit in meta_bits if _compact_text(bit)]) or "N/A"
+        source_bits = [place.get("source")]
+        if place.get("lat") is not None and place.get("lon") is not None:
+            source_bits.append(f"{place.get('lat')}, {place.get('lon')}")
+        summary_bits = [place.get("summary")]
+        place_rows.append([
+            place.get("name") or "N/A",
+            meta_text,
+            " | ".join([_compact_text(bit) for bit in source_bits + summary_bits if _compact_text(bit)]) or "N/A",
+        ])
 
-        lines.append(f"- {name}")
-        if details:
-            lines.append(f"  {'; '.join(details)}")
-        if place.get("summary"):
-            lines.append(f"  {place.get('summary')}")
-        if place.get("url"):
-            lines.append(f"  {place.get('url')}")
-    lines.append("")
-    return lines
+    content.append(_table(place_rows, styles, col_widths=[48 * mm, 44 * mm, 78 * mm]))
+    content.append(Spacer(1, 6))
+    return content
 
 
-def _render_notes(
-    itinerary: Dict,
-    food: Dict,
-    emergency: Dict,
-    travel_recs: Dict,
-    weather_data: Dict,
-    budget_summary: Dict,
-    prefs: Dict,
-) -> List[str]:
-    lines = ["NOTES", "-" * 60]
-    notes = []
-    notes.extend((itinerary or {}).get("notes") or [])
-    notes.extend((travel_recs or {}).get("recommendations") or [])
-    notes.extend((food or {}).get("suggestions") or [])
-    notes.extend((emergency or {}).get("tips") or [])
+def _build_notes_and_facts(state: TripPlannerState, styles) -> List[Any]:
+    prefs = state.trip_preferences or {}
+    itinerary = state.itinerary or {}
+    weather_data = state.weather_data or {}
+    budget_summary = state.budget_summary or {}
+    food = state.food_recommendations or {}
+    emergency = state.emergency_tips or {}
 
-    forecast = (weather_data or {}).get("forecast") or []
+    notes: List[str] = []
+    notes.extend([_compact_text(item) for item in _as_list(itinerary.get("notes")) if _compact_text(item)])
+    notes.extend([_compact_text(item) for item in _as_list((food or {}).get("suggestions")) if _compact_text(item)])
+    notes.extend([_compact_text(item) for item in _as_list((emergency or {}).get("tips")) if _compact_text(item)])
+    notes.extend([_compact_text(item) for item in _as_list(state.warnings) if _compact_text(item)])
+    notes.extend([_compact_text(item) for item in _as_list(state.errors) if _compact_text(item)])
+
+    forecast = _as_list(weather_data.get("forecast"))
     if forecast:
-        first = forecast[0]
-        date = first.get("date") or first.get("time") or ""
-        temp = first.get("temp_c") or first.get("temp_max_c") or ""
-        desc = first.get("description") or first.get("weathercode") or ""
+        first = forecast[0] or {}
+        date = _compact_text(first.get("date") or first.get("time"))
+        temp = first.get("temp_c") or first.get("temp_max_c") or first.get("temp")
+        desc = _compact_text(first.get("description") or first.get("weathercode") or first.get("summary"))
         notes.append(f"Weather snapshot: {date} {temp}C {desc}".strip())
+    elif weather_data.get("summary"):
+        notes.append(f"Weather snapshot: {_compact_text(weather_data.get('summary'))}")
 
-    est = (budget_summary or {}).get("estimated_total")
-    limit = prefs.get("budget")
-    if est is not None or limit is not None:
-        notes.append(f"Budget: estimated total {est}; limit {limit}. Keep a 10-15% buffer for food, transfers, and local transport.")
+    estimated_total = budget_summary.get("estimated_total")
+    budget_limit = prefs.get("budget")
+    if estimated_total is not None or budget_limit is not None:
+        notes.append(
+            f"Budget fact: estimated total {_format_money(estimated_total)} against limit {_format_money(budget_limit)}. Keep a 10-15% buffer for local transport and incidentals."
+        )
 
+    notes.append(f"Review verdict: {'approved' if state.review_status.approved else 'not approved'}")
+    if state.final_output.get("summary"):
+        notes.append(f"Final summary: {_compact_text(state.final_output.get('summary'))}")
+
+    unique_notes: List[str] = []
     seen = set()
-    unique_notes = []
     for note in notes:
-        text = _safe_str(note).strip()
-        if text and text not in seen:
-            seen.add(text)
-            unique_notes.append(text)
+        if note and note not in seen:
+            seen.add(note)
+            unique_notes.append(note)
 
-    if not unique_notes:
-        lines.append("No additional notes available")
-    else:
+    content: List[Any] = [
+        *_section_heading("Notes & Facts", styles),
+        _table(
+            [["Field", "Value"], ["Trip days", itinerary.get("trip_days") or "N/A"], ["Destination", prefs.get("destination") or "N/A"], ["Weather source", weather_data.get("source") or "N/A"], ["Budget estimate", _format_money(budget_summary.get("estimated_total"))], ["Approved", "Yes" if state.review_status.approved else "No"]],
+            styles,
+            col_widths=[48 * mm, 122 * mm],
+        ),
+        Spacer(1, 4),
+    ]
+
+    if unique_notes:
         for note in unique_notes[:30]:
-            lines.append(f"- {note}")
-    lines.append("")
-    return lines
+            content.append(Paragraph(f"- {escape(note)}", styles["BulletBody"]))
+    else:
+        content.append(Paragraph("No additional notes available.", styles["SectionNote"]))
+
+    content.append(Spacer(1, 6))
+    return content
 
 
-def _write_pdf(path: str, lines: List[str]) -> None:
-    pdf = canvas.Canvas(path, pagesize=A4)
-    _, page_height = A4
-    x = 40
-    y = page_height - 50
-    line_height = 14
+def _build_document_story(state: TripPlannerState, styles) -> List[Any]:
+    prefs = state.trip_preferences or {}
+    destination = _compact_text(prefs.get("destination") or "Destination")
+    summary = _compact_text(state.final_output.get("summary") or "")
+    if not summary:
+        summary = "Planner output generated from the current trip state."
 
-    pdf.setFont("Helvetica", 10)
-    for line in _wrap_lines(lines):
-        if y < 50:
-            pdf.showPage()
-            pdf.setFont("Helvetica", 10)
-            y = page_height - 50
-        pdf.drawString(x, y, _pdf_safe_text(line))
-        y -= line_height
-    pdf.save()
-
-
-def _wrap_lines(lines: List[str], width: int = 92) -> List[str]:
-    wrapped: List[str] = []
-    for line in lines:
-        text = _safe_str(line)
-        if not text:
-            wrapped.append("")
-            continue
-        wrapped.extend(textwrap.wrap(text, width=width) or [""])
-    return wrapped
-
-
-def _pdf_safe_text(value) -> str:
-    text = _safe_str(value)
-    replacements = {
-        "₹": "INR ",
-        "→": "->",
-        "°": " deg",
-        "–": "-",
-        "—": "-",
-        "’": "'",
-        "“": '"',
-        "”": '"',
-    }
-    for old, new in replacements.items():
-        text = text.replace(old, new)
-    return text.encode("latin-1", errors="replace").decode("latin-1")
+    story: List[Any] = [
+        Spacer(1, 4),
+        Paragraph("Trip Planner Report", styles["ReportTitle"]),
+        Paragraph(destination, styles["ReportTitle"]),
+        Paragraph(summary, styles["ReportSubtitle"]),
+        Spacer(1, 6),
+    ]
+    story.extend(_build_trip_basic_details(state, styles))
+    story.extend(_build_flight_details(state, styles))
+    story.extend(_build_hotel_details(state, styles))
+    story.extend(_build_tourist_locations(state, styles))
+    story.extend(_build_notes_and_facts(state, styles))
+    return story
 
 
 def generate_reports(state: TripPlannerState) -> Dict[str, str]:
@@ -264,9 +487,9 @@ def generate_reports(state: TripPlannerState) -> Dict[str, str]:
     pdf_path = os.path.join(out_dir, f"trip_{state.session_id}.pdf")
 
     prefs = state.trip_preferences or {}
-    destination = _safe_str(prefs.get("destination") or "")
-    transport_pref = _safe_str(prefs.get("transport_pref") or "")
-    food_pref = _safe_str(prefs.get("food_pref") or "")
+    destination = _compact_text(prefs.get("destination") or "")
+    transport_pref = _compact_text(prefs.get("transport_pref") or "")
+    food_pref = _compact_text(prefs.get("food_pref") or "")
 
     itinerary = state.itinerary or {}
     food = state.food_recommendations or _food_suggestions(destination, food_pref)
@@ -275,35 +498,30 @@ def generate_reports(state: TripPlannerState) -> Dict[str, str]:
 
     state.food_recommendations = food
     state.emergency_tips = emergency
+    state.final_output = state.final_output or {}
+    if not state.final_output.get("summary"):
+        state.final_output["summary"] = "Trip planned and approved." if state.review_status.approved else "Trip planned with review warnings."
+    notes: List[str] = []
+    for item in _as_list(state.final_output.get("notes")) + _as_list(itinerary.get("notes")):
+        text = _compact_text(item)
+        if text and text not in notes:
+            notes.append(text)
+    state.final_output["notes"] = notes
+    if travel_recs.get("recommendations"):
+        state.final_output["travel_recommendations"] = travel_recs["recommendations"]
 
-    lines: List[str] = []
-    lines.extend(["=" * 60, "TRIP PLANNER REPORT", "=" * 60])
-    lines.append(f"Session ID: {state.session_id}")
-    lines.append("")
-    lines.extend(
-        _lines_from_kv(
-            "TRIP INFORMATION",
-            [
-                ("From", f"{prefs.get('source')} -> {prefs.get('destination')}"),
-                ("Dates", f"{prefs.get('start_date')} to {prefs.get('end_date')}"),
-                ("Budget", f"INR {prefs.get('budget'):,}" if isinstance(prefs.get("budget"), (int, float)) else _safe_str(prefs.get("budget"))),
-                ("Travelers", _safe_str(prefs.get("travelers"))),
-                ("Travel Type", _safe_str(prefs.get("travel_type"))),
-                ("Hotel Preference", _safe_str(prefs.get("hotel_pref"))),
-                ("Food Preference", _safe_str(prefs.get("food_pref"))),
-                ("Transport Preference", _safe_str(prefs.get("transport_pref"))),
-                ("Interests", ", ".join([_safe_str(x) for x in (prefs.get("places_of_interest") or []) if x])),
-                ("Luxury Level", _safe_str(prefs.get("luxury"))),
-            ],
-        )
+    styles = _styles()
+    doc = SimpleDocTemplate(
+        pdf_path,
+        pagesize=A4,
+        leftMargin=18 * mm,
+        rightMargin=18 * mm,
+        topMargin=20 * mm,
+        bottomMargin=18 * mm,
+        title=f"Trip Planner Report - {destination or state.session_id}",
+        author="Trip Planner Multi-Agent",
     )
-    lines.extend(_render_hotels(state.hotel_data or {}))
-    lines.extend(_render_transport(state.transport_data or {}))
-    lines.extend(_render_places(state.places_data or {}))
-    lines.extend(_render_notes(itinerary, food, emergency, travel_recs, state.weather_data or {}, state.budget_summary or {}, prefs))
-    lines.extend(["=" * 60, "END OF REPORT", "=" * 60])
-
-    _write_pdf(pdf_path, lines)
+    doc.build(_build_document_story(state, styles), onFirstPage=_page_decorations, onLaterPages=_page_decorations)
     return {"pdf_path": pdf_path}
 
 

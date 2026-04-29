@@ -36,14 +36,24 @@ class TransportService:
         if not recommendations:
             recommendations.append({"mode": transport_pref or "flight", "reason": "Fallback recommendation"})
 
-        return {
-            "route": route_data,
-            "recommendations": recommendations,
-            "budget_signal": "tight" if budget and budget < 20000 else "normal",
-            "source": route_data.get("source", "routing"),
+        primary = recommendations[0] if recommendations else {}
+        flight_details = {
+            "recommended_mode": primary.get("mode") or transport_pref or "flight",
+            "reason": primary.get("reason") or "Fallback recommendation",
             "summary": (
                 "Use flight plus island transfer; road distance is not meaningful for this destination"
                 if island_destination
                 else f"Route estimate {distance:.1f} km, {duration:.1f} min" if distance and duration else "Route estimate unavailable"
             ),
+            "route": route_data,
+            "options": recommendations,
+        }
+
+        return {
+            "route": route_data,
+            "recommendations": recommendations,
+            "budget_signal": "tight" if budget and budget < 20000 else "normal",
+            "source": route_data.get("source", "routing"),
+            "summary": flight_details["summary"],
+            "flight_details": flight_details,
         }
