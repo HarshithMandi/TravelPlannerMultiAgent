@@ -525,14 +525,50 @@ with right:
             c1, c2 = st.columns(2)
             with c1:
                 st.markdown("#### Flight details")
-                st.write((transport_data.get("flight_details") or transport_data or {}).get("summary", "No transport summary available."))
-                st.json(transport_data) if debug else st.caption("Transport details are summarized in the report tab.")
+                flight_details = transport_data.get("flight_details") or {}
+                st.write(flight_details.get("summary") or transport_data.get("summary") or "No transport summary available.")
+
+                flight_recs = flight_details.get("flight_recommendations") or []
+                if flight_recs:
+                    for rec in flight_recs[:5]:
+                        st.markdown(
+                            f"""
+                            <div class="soft-box" style="margin-bottom:0.6rem;">
+                                <div class="metric-label">{rec.get('airline', 'Airline')} • {rec.get('flight_number', 'N/A')}</div>
+                                <div class="metric-value" style="font-size:1rem;">{rec.get('from', 'N/A')} → {rec.get('to', 'N/A')}</div>
+                                <div class="metric-subtitle">Departure: {rec.get('departure_time', 'N/A')} | Arrival: {rec.get('arrival_time', 'N/A')} | Duration: {rec.get('duration_min', 'N/A')} min</div>
+                                <div class="section-subtitle" style="margin-top:0.35rem;">{rec.get('note', '')}</div>
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
+                        )
+                else:
+                    st.caption("No specific flight options available for this route.")
+
+                if debug:
+                    st.json(transport_data)
             with c2:
-                st.markdown("#### Hotels")
-                if hotel_data.get("suggestions") or hotel_data.get("hotels"):
-                    st.json(hotel_data) if debug else st.write("Top hotel suggestions are included in the generated PDF.")
+                st.markdown("#### Hotel recommendations")
+                hotels = hotel_data.get("suggestions") or hotel_data.get("hotels") or []
+                if hotels:
+                    for hotel in hotels[:6]:
+                        hotel_name = hotel.get("name") or "Hotel"
+                        meta = " | ".join([str(x) for x in [hotel.get("type"), hotel.get("rating_hint"), hotel.get("source")] if x])
+                        st.markdown(
+                            f"""
+                            <div class="soft-box" style="margin-bottom:0.6rem;">
+                                <div class="metric-value" style="font-size:1rem;">{hotel_name}</div>
+                                <div class="metric-subtitle">{meta or 'Recommended stay option'}</div>
+                                <div class="section-subtitle" style="margin-top:0.3rem;">{hotel.get('summary', 'No summary available.')}</div>
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
+                        )
                 else:
                     st.caption("No hotel suggestions available.")
+
+                if debug:
+                    st.json(hotel_data)
 
             st.markdown("#### Tourist locations")
             if places_data.get("places"):

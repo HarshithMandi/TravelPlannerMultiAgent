@@ -1,4 +1,6 @@
 import os
+import json
+import logging
 from typing import Any, Dict, Iterable, List, Sequence, Tuple
 from xml.sax.saxutils import escape
 
@@ -9,7 +11,11 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
+from src.config.settings import settings
+from src.services.llm_service import SarvamLLMService
 from src.state.schemas import TripPlannerState
+
+logger = logging.getLogger(__name__)
 
 
 def _safe_str(value: Any) -> str:
@@ -260,6 +266,191 @@ def _travel_recommendations(prefs: Dict, itinerary: Dict) -> Dict:
     return {"recommendations": recs}
 
 
+def _generate_plaintext_report(state: TripPlannerState) -> str:
+    """Generate a comprehensive plaintext report from the trip state."""
+    prefs = state.trip_preferences or {}
+    transport_data = state.transport_data or {}
+    flight_details = transport_data.get("flight_details") or {}
+    hotels = (state.hotel_data or {}).get("suggestions") or (state.hotel_data or {}).get("hotels") or []
+    places = (state.places_data or {}).get("places") or []
+    itinerary = state.itinerary or {}
+    weather = state.weather_data or {}
+    budget = state.budget_summary or {}
+
+    lines = []
+
+    # Trip Overview
+    lines.append("=" * 80)
+    lines.append("TRIP PLANNER REPORT")
+    lines.append("=" * 80)
+    lines.append("")
+    
+    lines.append("TRIP OVERVIEW")
+    lines.append("-" * 40)
+    lines.append(f"From: {prefs.get('source') or 'N/A'}")
+    lines.append(f"To: {prefs.get('destination') or 'N/A'}")
+    lines.append(f"Start Date: {prefs.get('start_date') or 'N/A'}")
+    lines.append(f"End Date: {prefs.get('end_date') or 'N/A'}")
+    lines.append(f"Budget: INR {prefs.get('budget') or 'N/A'}")
+    lines.append(f"Number of Travelers: {prefs.get('travelers') or 'N/A'}")
+    lines.append(f"Travel Type: {prefs.get('travel_type') or 'N/A'}")
+    lines.append(f"Hotel Preference: {prefs.get('hotel_pref') or 'N/A'}")
+    lines.append(f"Food Preference: {prefs.get('food_pref') or 'N/A'}")
+    lines.append(f"Transport Preference: {prefs.get('transport_pref') or 'N/A'}")
+    interests_str = ", ".join(_as_list(prefs.get("places_of_interest"))) or "N/A"
+    lines.append(f"Interests: {interests_str}")
+    lines.append("")
+
+    # Flight Details
+    lines.append("FLIGHT & TRANSPORTATION")
+    lines.append("-" * 40)
+    lines.append(f"Recommended Mode: {flight_details.get('recommended_mode') or 'N/A'}")
+    lines.append(f"Reason: {flight_details.get('reason') or 'N/A'}")
+    lines.append(f"Summary: {flight_details.get('summary') or transport_data.get('summary') or 'N/A'}")
+    lines.append("")
+    
+    flight_recs = flight_details.get("flight_recommendations") or []
+    if flight_recs:
+        lines.append("Flight Recommendations:")
+        for i, flight in enumerate(flight_recs[:6], 1):
+            lines.append(f"  Option {i}: {flight.get('airline', 'N/A')} - Flight {flight.get('flight_number', 'N/A')}")
+            lines.append(f"    Route: {flight.get('from', 'N/A')} → {flight.get('to', 'N/A')}")
+            lines.append(f"    Departure: {flight.get('departure_time', 'N/A')}, Arrival: {flight.get('arrival_time', 'N/A')}")
+            lines.append(f"    Duration: {flight.get('duration_min', 'N/A')} minutes")
+            lines.append("")
+
+    # Hotels
+    lines.append("ACCOMMODATION OPTIONS")
+    lines.append("-" * 40)
+    if hotels:
+        for i, hotel in enumerate(hotels[:10], 1):
+            lines.append(f"{i}. {hotel.get('name', 'N/A')}")
+            lines.append(f"   Type: {hotel.get('type', 'N/A')}")
+            lines.append(f"   Rating: {hotel.get('rating_hint', 'N/A')}")
+            lines.append(f"   Details: {hotel.get('summary', 'N/A')}")
+            lines.append("")
+    else:
+        lines.append("No hotel recommendations available.")
+        lines.append("")
+
+    # Tourist Attractions
+    lines.append("MUST-VISIT ATTRACTIONS & PLACES")
+    lines.append("-" * 40)
+    if places:
+        for i, place in enumerate(places[:15], 1):
+            lines.append(f"{i}. {place.get('name', 'N/A')}")
+            lines.append(f"   Type: {place.get('type', 'N/A')}")
+            lines.append(f"   Best For: {place.get('best_for', 'N/A')}")
+            lines.append(f"   Description: {place.get('summary', 'N/A')}")
+            lines.append("")
+    else:
+        lines.append("No tourist attractions found.")
+        lines.append("")
+
+    # Itinerary
+    lines.append("SUGGESTED ITINERARY")
+    lines.append("-" * 40)
+    itinerary_text = itinerary.get("itinerary") or itinerary.get("plan") or ""
+    if itinerary_text:
+        lines.append(str(itinerary_text))
+        lines.append("")
+    else:
+        lines.append("No detailed itinerary available.")
+        lines.append("")
+
+    # Weather
+    if weather:
+        lines.append("WEATHER FORECAST")
+        lines.append("-" * 40)
+        forecast = weather.get("forecast") or []
+        if forecast:
+            for entry in forecast[:5]:
+                lines.append(f"Date: {entry.get('date', 'N/A')}")
+                lines.append(f"Condition: {entry.get('description', entry.get('weathercode', 'N/A'))}")
+                lines.append(f"Temp: {entry.get('max_temp')}°C - {entry.get('min_temp')}°C")
+                lines.append("")
+
+    # Budget
+    if budget:
+        lines.append("BUDGET BREAKDOWN")
+        lines.append("-" * 40)
+        lines.append(f"Total Budget: INR {budget.get('total_budget', 'N/A')}")
+        lines.append(f"Estimated Flight: INR {budget.get('flight_cost', 'N/A')}")
+        lines.append(f"Estimated Hotel (per night): INR {budget.get('hotel_per_night', 'N/A')}")
+        lines.append(f"Estimated Food (per day): INR {budget.get('food_per_day', 'N/A')}")
+        lines.append(f"Remaining for Activities: INR {budget.get('activity_budget', 'N/A')}")
+        lines.append("")
+
+    # Emergency Tips
+    emergency = state.emergency_tips or {}
+    if emergency:
+        lines.append("TRAVEL SAFETY & EMERGENCY TIPS")
+        lines.append("-" * 40)
+        tips = emergency.get("tips") or []
+        for tip in tips:
+            lines.append(f"• {tip}")
+        lines.append("")
+
+    # Food Recommendations
+    food_rec = state.food_recommendations or {}
+    if food_rec:
+        lines.append("FOOD & DINING RECOMMENDATIONS")
+        lines.append("-" * 40)
+        suggestions = food_rec.get("suggestions") or []
+        for suggestion in suggestions:
+            lines.append(f"• {suggestion}")
+        lines.append("")
+
+    # Approval Status
+    lines.append("APPROVAL STATUS")
+    lines.append("-" * 40)
+    lines.append(f"Approved: {'Yes' if state.review_status.approved else 'No'}")
+    if state.review_status.reasons:
+        lines.append("Reasons:")
+        for reason in state.review_status.reasons:
+            lines.append(f"  • {reason}")
+    lines.append("")
+    lines.append("=" * 80)
+
+    return "\n".join(lines)
+
+
+def _enhance_report_with_llm(plaintext_report: str) -> str:
+    """Send plaintext report to LLM for enhancement and formatting."""
+    if not settings.SARVAM_API_KEY:
+        logger.info("No SARVAM_API_KEY configured, skipping LLM enhancement")
+        return ""
+
+    llm = SarvamLLMService(api_key=settings.SARVAM_API_KEY, model=settings.SARVAM_MODEL)
+    if not getattr(llm, "enabled", False):
+        logger.info("LLM service not enabled, skipping enhancement")
+        return ""
+
+    system = (
+        "You are a professional travel report writer and editor. You will receive a plaintext trip report and your job is to:\n"
+        "1. Expand and enhance the report with vivid descriptions\n"
+        "2. Make it more verbose and detailed\n"
+        "3. Improve grammar and flow\n"
+        "4. Add travel tips and insights based on the provided information\n"
+        "5. Format it nicely with proper sections and structure\n"
+        "6. Keep all factual information intact\n"
+        "Return ONLY the enhanced report text, nothing else."
+    )
+    user = f"Please enhance and improve this trip report:\n\n{plaintext_report}"
+
+    try:
+        enhanced = llm.chat_text(system=system, user=user, timeout=60)
+        if enhanced:
+            enhanced = enhanced.strip() if isinstance(enhanced, str) else ""
+            if enhanced:
+                logger.info("Successfully enhanced report with LLM")
+                return enhanced
+    except Exception as exc:
+        logger.warning("LLM report enhancement failed: %s", exc)
+    
+    return ""
+
+
 def _build_trip_basic_details(state: TripPlannerState, styles) -> List[Any]:
     prefs = state.trip_preferences or {}
     rows = _kv_rows(
@@ -321,6 +512,20 @@ def _build_flight_details(state: TripPlannerState, styles) -> List[Any]:
         content.extend([Paragraph("Transport options", styles["SectionNote"]), _table(option_rows, styles, col_widths=[42 * mm, 128 * mm])])
     else:
         content.append(Paragraph("No transport options were returned by the agent.", styles["SectionNote"]))
+
+    flight_rows: List[List[Any]] = [["Airline", "Flight", "Departure", "Arrival", "Duration (min)"]]
+    for rec in (flight_details.get("flight_recommendations") or [])[:6]:
+        flight_rows.append(
+            [
+                rec.get("airline") or "N/A",
+                rec.get("flight_number") or "N/A",
+                rec.get("departure_time") or "N/A",
+                rec.get("arrival_time") or "N/A",
+                rec.get("duration_min") or "N/A",
+            ]
+        )
+    if len(flight_rows) > 1:
+        content.extend([Paragraph("Flight recommendations", styles["SectionNote"]), _table(flight_rows, styles, col_widths=[42 * mm, 36 * mm, 30 * mm, 30 * mm, 32 * mm])])
 
     content.append(Spacer(1, 6))
     return content
@@ -463,7 +668,7 @@ def _build_document_story(state: TripPlannerState, styles) -> List[Any]:
     destination = _compact_text(prefs.get("destination") or "Destination")
     summary = _compact_text(state.final_output.get("summary") or "")
     if not summary:
-        summary = "Planner output generated from the current trip state."
+        summary = "Your trip has been professionally planned and reviewed."
 
     story: List[Any] = [
         Spacer(1, 4),
@@ -472,6 +677,57 @@ def _build_document_story(state: TripPlannerState, styles) -> List[Any]:
         Paragraph(summary, styles["ReportSubtitle"]),
         Spacer(1, 6),
     ]
+
+    # Display enhanced report if available
+    enhanced_report = (state.final_output or {}).get("enhanced_report")
+    if enhanced_report:
+        # Split the enhanced report into paragraphs and add them
+        paragraphs = enhanced_report.split("\n")
+        for para_text in paragraphs:
+            para_text = para_text.strip()
+            if not para_text:
+                story.append(Spacer(1, 3))
+            elif para_text.startswith("=" * 10):
+                # Section divider - skip
+                story.append(Spacer(1, 6))
+            elif para_text.startswith("-" * 10):
+                # Sub-section divider - skip
+                story.append(Spacer(1, 4))
+            elif para_text.isupper() and len(para_text) < 60:
+                # Section heading
+                story.append(Paragraph(escape(para_text), styles["SectionHeading"]))
+                story.append(Spacer(1, 3))
+            elif para_text.startswith("•") or para_text.startswith("-"):
+                # Bullet point
+                story.append(Paragraph(escape(para_text), styles["BulletBody"]))
+            elif ":" in para_text and len(para_text) < 100:
+                # Key-value pair (like "From: Bangalore")
+                story.append(Paragraph(escape(para_text), styles["TableBody"]))
+            else:
+                # Regular paragraph
+                story.append(Paragraph(escape(para_text), styles["SectionNote"]))
+        story.append(Spacer(1, 6))
+    else:
+        # Fallback to plaintext report if LLM enhancement not available
+        plaintext_report = (state.final_output or {}).get("plaintext_report")
+        if plaintext_report:
+            story.append(Paragraph("Report Details", styles["SectionHeading"]))
+            story.append(Spacer(1, 3))
+            paragraphs = plaintext_report.split("\n")
+            for para_text in paragraphs:
+                para_text = para_text.strip()
+                if not para_text or para_text.startswith("=" * 10) or para_text.startswith("-" * 10):
+                    continue
+                if para_text.isupper() and len(para_text) < 60:
+                    story.append(Paragraph(escape(para_text), styles["SectionHeading"]))
+                    story.append(Spacer(1, 2))
+                elif para_text.startswith("•") or para_text.startswith("-"):
+                    story.append(Paragraph(escape(para_text), styles["BulletBody"]))
+                else:
+                    story.append(Paragraph(escape(para_text), styles["SectionNote"]))
+            story.append(Spacer(1, 6))
+
+    # Add traditional sections as well for completeness
     story.extend(_build_trip_basic_details(state, styles))
     story.extend(_build_flight_details(state, styles))
     story.extend(_build_hotel_details(state, styles))
@@ -498,15 +754,21 @@ def generate_reports(state: TripPlannerState) -> Dict[str, str]:
 
     state.food_recommendations = food
     state.emergency_tips = emergency
+
+    # Generate plaintext report and enhance with LLM
+    plaintext_report = _generate_plaintext_report(state)
+    enhanced_report = _enhance_report_with_llm(plaintext_report)
+
     state.final_output = state.final_output or {}
-    if not state.final_output.get("summary"):
+    
+    # Use enhanced report if available, otherwise keep plaintext
+    if enhanced_report:
+        state.final_output["enhanced_report"] = enhanced_report
+        state.final_output["summary"] = "Your trip has been professionally planned and reviewed."
+    else:
+        state.final_output["plaintext_report"] = plaintext_report
         state.final_output["summary"] = "Trip planned and approved." if state.review_status.approved else "Trip planned with review warnings."
-    notes: List[str] = []
-    for item in _as_list(state.final_output.get("notes")) + _as_list(itinerary.get("notes")):
-        text = _compact_text(item)
-        if text and text not in notes:
-            notes.append(text)
-    state.final_output["notes"] = notes
+
     if travel_recs.get("recommendations"):
         state.final_output["travel_recommendations"] = travel_recs["recommendations"]
 
